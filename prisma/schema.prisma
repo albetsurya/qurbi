@@ -1,0 +1,124 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+enum LivestockType {
+  KAMBING
+  DOMBA
+  SAPI
+}
+
+enum LivestockPurpose {
+  QURBAN
+  AQIQAH
+  BOTH
+}
+
+enum Gender {
+  JANTAN
+  BETINA
+}
+
+enum Role {
+  USER
+  ADMIN
+}
+
+enum OrderStatus {
+  PENDING
+  PAID
+  PROCESSING
+  DELIVERING
+  DELIVERED
+  COMPLETED
+  CANCELLED
+}
+
+enum DeliveryType {
+  DELIVERY
+  PICKUP
+  SLAUGHTER
+}
+
+model Breeder {
+  id          String     @id @default(cuid())
+  name        String
+  location    String
+  isVerified  Boolean    @default(false)
+  rating      Float      @default(5)
+  reviewCount Int        @default(0)
+  livestock   Livestock[]
+  createdAt   DateTime   @default(now())
+}
+
+model Livestock {
+  id          String           @id @default(cuid())
+  slug        String           @unique
+  name        String
+  type        LivestockType
+  purpose     LivestockPurpose
+  price       Decimal          @db.Decimal(14, 2)
+  weightKg    Decimal          @db.Decimal(6, 2)
+  ageMonths   Int
+  gender      Gender
+  stock       Int              @default(1)
+  description String?
+  images      Json             @default("[]")
+  videoUrl    String?
+  cctvUrl     String?
+  vaccines    Json             @default("[]")
+  isVerified  Boolean          @default(false)
+  isActive    Boolean          @default(true)
+  breeder     Breeder          @relation(fields: [breederId], references: [id])
+  breederId   String
+  orders      Order[]
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
+
+  @@index([type, purpose, isActive])
+}
+
+model User {
+  id        String   @id @default(cuid())
+  phone     String   @unique
+  name      String?
+  email     String?
+  role      Role     @default(USER)
+  orders    Order[]
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Order {
+  id              String       @id @default(cuid())
+  orderNumber     String       @unique
+  user            User?        @relation(fields: [userId], references: [id])
+  userId          String?
+  guestName       String
+  guestPhone      String
+  guestEmail      String?
+  livestock       Livestock    @relation(fields: [livestockId], references: [id])
+  livestockId     String
+  quantity        Int          @default(1)
+  totalAmount     Decimal      @db.Decimal(14, 2)
+  status          OrderStatus  @default(PENDING)
+  deliveryType    DeliveryType
+  deliveryAddress String?
+  deliveryDate    DateTime?
+  notes           String?
+  paymentMethod   String
+  paymentRef      String?
+  paymentUrl      String?
+  paidAt          DateTime?
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
+
+  @@index([guestPhone])
+  @@index([status])
+}
