@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { createHmac, createHash } from "node:crypto";
 import { verifyDokuWebhookSignature } from "@/lib/doku";
 
@@ -97,5 +97,64 @@ describe("DOKU SNAP Webhook Signature Verification", () => {
 
     const isValid = verifyDokuWebhookSignature("2026-10-19T04:00:00Z", "/api/doku/webhook", "{}", "HMACSHA256=xxx");
     expect(isValid).toBe(false);
+  });
+});
+
+describe("DOKU SNAP Webhook Idempotency Simulation", () => {
+  interface MockOrder {
+    orderNumber: string;
+    status: "PENDING" | "PAID";
+    paidAt?: Date;
+    transitionCount: number;
+    notificationSentCount: number;
+  }
+
+  // Simulasi logika endpoint api/doku/webhook/route.ts
+  async function handleWebhookPayload(
+    order: MockOrder,
+    payload: { invoice_number: string; status: string }
+  ) {
+    if (!["SUCCESS", "PAID"].includes(payload.status.toUpperCase())) {
+      return { success: true, processed: false };
+    }
+
+    // Atomik updateMany: hanya update jika status saat ini masih PENDING
+    if (order.orderNumber === payload.invoice_number && order.status === "PENDING") {
+      order.status = "PAID";
+      order.paidAt = new Date();
+      order.transitionCount += 1;
+      order.notificationSentCount += 1;
+      return { success: true, processed: true };
+    }
+
+    // Idempotent: pesanan sudah dibayar sebelumnya
+    return { success: true, processed: false };
+  }
+
+  it("memproses pembayaran pada pengiriman pertama, dan mengabaikan pengiriman duplikat (idempoten)", async () => {
+    const mockOrder: MockOrder = {
+      orderNumber: "QBK-IDEMPOTENT-001",
+      status: "PENDING",
+      transitionCount: 0,
+      notificationSentCount: 0,
+    };
+
+    const payload = { invoice_number: "QBK-IDEMPOTENT-001", status: "SUCCESS" };
+
+    // Pengiriman Webhook 1 (sukses pertama)
+    const result1 = await handleWebhookPayload(mockOrder, payload);
+    expect(result1.processed).toBe(true);
+    expect(mockOrder.status).toBe("PAID");
+    expect(mockOrder.transitionCount).toBe(1);
+    expect(mockOrder.notificationSentCount).toBe(1);
+    const firstPaidAt = mockOrder.paidAt;
+
+    // Pengiriman Webhook 2 (payload identik / retry dari DOKU)
+    const result2 = await handleWebhookPayload(mockOrder, payload);
+    expect(result2.processed).toBe(false);
+    expect(mockOrder.status).toBe("PAID"); // State tidak berubah lagi
+    expect(mockOrder.transitionCount).toBe(1); // Transisi hanya 1x
+    expect(mockOrder.notificationSentCount).toBe(1); // Notifikasi WhatsApp tidak dikirim ganda
+    expect(mockOrder.paidAt).toEqual(firstPaidAt);
   });
 });

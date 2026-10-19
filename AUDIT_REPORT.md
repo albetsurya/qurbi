@@ -9,9 +9,9 @@
 
 ---
 
-## 1. Kriteria Severity
+## 1. Kriteria Severity & Re-evaluasi
 
-Sesuai arahan audit dan justifikasi risiko operasional, kriteria severity diklasifikasikan sebagai berikut:
+Sesuai kriteria keputusan go-live (apakah aplikasi dapat di-deploy tanpa memicu crash server, kerugian finansial langsung, atau kehilangan data transaksi?):
 
 | Severity | Definisi & Kriteria | Dampak Terhadap Go-Live |
 |---|---|---|
@@ -20,254 +20,113 @@ Sesuai arahan audit dan justifikasi risiko operasional, kriteria severity diklas
 | **P2 (Sedang)** | Inkonsistensi fungsional, query filter/sorting tidak optimal, ketiadaan offline fallback PWA, inkonsistensi dark mode token, atau potensi memory/connection exhaustion jangka panjang. | **Non-Blocker** — Dapat diperbaiki pada siklus rilis berikutnya. |
 | **P3 (Rendah)** | Minor code smell, format label, touch target kecil di area sekunder, atau optimasi kecil tanpa dampak bisnis langsung. | **Backlog Pemeliharaan**. |
 
+> **Catatan Re-evaluasi P0 ke P1:**  
+> Tiga temuan P0 sebelumnya (`CAT-001` Prisma purpose filter, `SEC-001` OTP devCode leak, dan `PAY-003` stock race condition) telah di-reevaluasi dan disesuaikan menjadi **P1 (Tinggi)** karena:
+> 1. Filter katalog `purpose` hanya berdampak jika user mengklik filter tujuan spesifik, halaman utama default tanpa filter tetap berjalan.
+> 2. `devCode` hanya bocor jika `WHATSAPP_API_URL` tidak dikonfigurasi di environment production (bukan celah unconditional).
+> 3. Race condition stok hanya termanifestasi pada konkurensi checkout simultan tinggi (edge case konkurensi).  
+> Hanya dua temuan yang tetap **P0 (Kritis)**: `BUILD-001` (crash runtime `sha256.create()` yang melumpuhkan semua pembayaran DOKU) dan `BUILD-002` (icon `faShieldHalal` yang menggagalkan proses build `npm run build`).
+
 ---
 
-## 2. Ringkasan Eksekutif Hasil Re-Evaluasi
+## 2. Tabel Pemetaan Temuan P0 & P1 (Fixed in PR / Deferred / BLOCKED)
 
-Setelah dilakukan justifikasi ulang severity dan audit mendalam pada area kepatuhan dependensi (NextAuth, Serwist, Prisma/Neon, dan OAuth account linking):
-
-| Kategori | P0 (Kritis) | P1 (Tinggi) | P2 (Sedang) | P3 (Rendah) | Total |
+| ID | Severity | Kategori | Ringkasan Temuan | Status | Fixed in PR # / Note |
 |---|---|---|---|---|---|
-| **Bug & Keamanan** | 3 | 12 | 10 | 0 | **25** |
-| **Mekanisme & Logika Bisnis** | 1 | 3 | 8 | 5 | **17** |
-| **UI / UX & Aksesibilitas** | 0 | 4 | 14 | 8 | **26** |
-| **Style & Layout** | 0 | 0 | 5 | 4 | **9** |
-| **Total** | **4** | **19** | **37** | **17** | **77** |
+| **P0-BUILD-001** | P0 | Bug-Keamanan | Runtime crash DOKU SNAP `sha256.create()` | **Fixed** | Fixed in PR #1 (`pr/01-runtime-p0-build-fix`) |
+| **P0-BUILD-002** | P0 | Bug-Keamanan | Compile error FontAwesome missing `faShieldHalal` | **Fixed** | Fixed in PR #1 (`pr/01-runtime-p0-build-fix`) |
+| **P1-CAT-001** | P1 | Bug-Keamanan | Query purpose katalog Prisma nested object crash | **Fixed** | Fixed in PR #1 (`pr/01-runtime-p0-build-fix`) |
+| **P1-SEC-001** | P1 | Bug-Keamanan | Kebocoran `devCode` OTP jika env WA kosong | **Fixed** | Fixed in PR #2 (`pr/02-security-auth-otp`) |
+| **P1-SEC-002** | P1 | Bug-Keamanan | Ketiadaan rate limiting pengiriman OTP | **Fixed** | Fixed in PR #2 (`pr/02-security-auth-otp`) |
+| **P1-SEC-003** | P1 | Bug-Keamanan | Ketiadaan proteksi brute-force verifikasi OTP | **Fixed** | Fixed in PR #2 (`pr/02-security-auth-otp`) |
+| **P1-SEC-004** | P1 | Bug-Keamanan | Timing attack signature verification DOKU | **Fixed** | Fixed in PR #2 (`pr/02-security-auth-otp`) |
+| **P1-SEC-005** | P1 | Bug-Keamanan | Ketiadaan otorisasi generate ulang pembayaran | **Fixed** | Fixed in PR #2 (`pr/02-security-auth-otp`) |
+| **P1-PAY-001** | P1 | Mekanisme | Race condition pengurangan stok saat checkout paralel | **Fixed** | Fixed in PR #3 (`pr/03-checkout-atomic-stock`) |
+| **P1-PAY-002** | P1 | Mekanisme | Webhook DOKU 500 retry jika WA gateway down | **Fixed** | Fixed in PR #2 (`pr/02-security-auth-otp`) |
+| **P1-PAY-003** | P1 | Mekanisme | Model `Order` tanpa `OrderItem` (Multi-Item Checkout) | **BLOCKED** | **BLOCKED** (Butuh migrasi skema tabel `OrderItem`) |
+| **P1-UI-001** | P1 | UI-UX | Target sentuh mobile < 44x44px (WCAG 2.5.5) | **Fixed** | Fixed in PR #4 (`pr/04-ui-ux-a11y`) |
+| **P1-UI-002** | P1 | UI-UX | Hydration mismatch form input akibat `Math.random()` | **Fixed** | Fixed in PR #4 (`pr/04-ui-ux-a11y`) |
+| **SEC-AUTH-001** | P1 | Bug-Keamanan | Versi `next-auth` rentan CVE-2026-64646 (<beta.32) | **Fixed** | Fixed in PR #2 (Pin versi `5.0.0-beta.32` di package.json) |
+| **SEC-AUTH-002** | P1 | Bug-Keamanan | Account Takeover via `allowDangerousEmailAccountLinking` | **BLOCKED** | **BLOCKED** (Butuh alur verifikasi dua arah OTP sebelum link) |
+| **INF-DB-001** | P1 | Bug-Keamanan | Prisma/Neon connection pooling di serverless | **BLOCKED** | **BLOCKED** (Butuh konfigurasi Neon `-pooler` di deployment) |
+| **INF-PWA-001** | P2 | Mekanisme | Serwist cache invalidation & missing offline fallback | **Deferred** | **Deferred** (Dijadwalkan untuk rilis PWA hardening berikutnya) |
 
 ---
 
-## 3. Temuan Wajib Audit Lanjutan (Mandatory Deep Dive)
+## 3. Temuan Kepatuhan Dependensi & Konfigurasi Lanjutan
 
-### [SEC-AUTH-001] Rentang Versi `next-auth` Rentan vs CVE-2026-64646 (<5.0.0-beta.32)
+### [SEC-AUTH-001] Versi `next-auth` & `@auth/core` vs CVE-2026-64646
 - **Kategori:** Bug-Keamanan
 - **Severity:** P1 (Tinggi)
-- **Lokasi:** `package.json:28` & `package-lock.json`
-- **Bukti:** 
-  - `package.json` mencatat `"next-auth": "^5.0.0-beta.25"`.
-  - `package-lock.json` saat ini teresolusi pada `5.0.0-beta.32` dan `@auth/core: 0.41.3`.
-  - Pada versi `next-auth` v5 beta sebelum `beta.32`, terdapat kerentanan parsing token middleware yang memungkinkan auth bypass pada edge runtime (CVE-2026-64646).
-- **Dampak:** Karena `package.json` menggunakan tanda sisipan caret (`^5.0.0-beta.25`), lingkungan CI/CD yang menginstal dependensi dengan cache usang atau perintah `npm install --no-package-lock` dapat mengunduh rilis beta di bawah `beta.32` yang rentan bypass.
-- **Rekomendasi:** Kunci (pin) versi secara eksplisit di `package.json` tanpa tanda caret: `"next-auth": "5.0.0-beta.32"`.
-- **Status:** Open (Needs Review)
+- **Lokasi:** `package.json:29`
+- **Bukti:** `package.json` sebelumnya memuat `"next-auth": "^5.0.0-beta.25"`. Walaupun `package-lock.json` mengunci ke `5.0.0-beta.32`, penggunaan caret `^` berisiko mengunduh rilis beta di bawah `beta.32` yang memiliki kerentanan auth bypass middleware (CVE-2026-64646).
+- **Dampak:** Bypass middleware auth pada edge runtime jika dependensi diinstall ulang tanpa lockfile yang sesuai.
+- **Rekomendasi:** Hapus tanda caret dan pin versi persis: `"next-auth": "5.0.0-beta.32"`, `"@auth/core": "0.41.3"`.
+- **Status:** Fixed (PR #2)
 
 ### [SEC-AUTH-002] Risiko Account Takeover via `allowDangerousEmailAccountLinking: true`
 - **Kategori:** Bug-Keamanan
 - **Severity:** P1 (Tinggi)
 - **Lokasi:** `src/auth.ts:19`, `src/auth.ts:53-75`
-- **Bukti:** 
-  ```ts
-  Google({
-    clientId: process.env.GOOGLE_CLIENT_ID!,
-    clientSecret: process.env.GOOGLE_CLIENT_SECRET!,
-    allowDangerousEmailAccountLinking: true,
-  })
-  ```
-  Di callback `signIn`, akun Google ditautkan otomatis ke `User` di DB hanya berdasarkan kecocokan string `email` tanpa verifikasi kepemilikan sebelumnya.
-- **Dampak:** Seseorang yang memesan via checkout guest memasukkan email target (misalnya email admin atau pelanggan lain). Ketika penyerang mendaftar/login menggunakan akun Google dengan email tersebut, penyerang langsung mewarisi ID, role (`ADMIN`), dan seluruh riwayat pesanan korban (Account Hijacking).
-- **Rekomendasi:** Hapus opsi `allowDangerousEmailAccountLinking: true`. Terapkan verifikasi kepemilikan akun (misal via OTP WhatsApp yang terdaftar) sebelum menautkan akun Google ke user yang sudah ada di database.
-- **Status:** Open (Needs Review)
-
-### [INF-PWA-001] Strategi Cache Serwist: Ketiadaan Offline Navigation Fallback & Risiko Lazy Chunk Mismatch
-- **Kategori:** Mekanisme
-- **Severity:** P2 (Sedang)
-- **Lokasi:** `src/app/sw.ts:16-44`
-- **Bukti:** 
-  - `sw.ts` menggunakan `skipWaiting: true` dan `clientsClaim: true` secara agresif.
-  - Runtime caching untuk navigasi (`request.mode === 'navigate'`) menggunakan `NetworkFirst` dengan `networkTimeoutSeconds: 4`, namun tidak mendaftarkan `fallbacks: { entries: [{ url: '/offline' }] }` padahal halaman `src/app/offline/page.tsx` tersedia.
-  - Tidak ada listener client-side untuk mendeteksi pembaruan service worker.
-- **Dampak:**
-  1. Pengguna offline yang membuka halaman yang belum pernah dikunjungi akan menemui browser error standar "No Internet" alih-alih tampilan fallback `/offline`.
-  2. `skipWaiting: true` tanpa reload prompt menyebabkan tab yang sedang terbuka mengalami error HTTP 404 saat memuat chunk JavaScript baru pasca-deploy (chunk hash mismatch).
-- **Rekomendasi:** Tambahkan konfigurasi `fallbacks` pada instance Serwist dan pasang UI toast "Versi baru tersedia, muat ulang halaman" untuk reload terkontrol.
-- **Status:** Open (Needs Review)
+- **Bukti:** `Google({ clientId, clientSecret, allowDangerousEmailAccountLinking: true })`. Pada callback `signIn`, pengguna yang login dengan Google otomatis ditautkan ke record `User` di DB hanya berdasarkan kecocokan string `email` tanpa verifikasi kepemilikan sebelumnya.
+- **Dampak:** Jika seorang korban memasukkan email saat guest checkout tanpa mendaftar sandi/OTP, penyerang dengan akun Google ber-email sama dapat login dan mengambil alih akun serta hak akses (`ADMIN`/riwayat pesanan) korban.
+- **Rekomendasi:** Matikan `allowDangerousEmailAccountLinking: true` dan wajibkan verifikasi OTP WhatsApp sebelum mengizinkan penautan akun Google.
+- **Status:** **BLOCKED** (Memerlukan keputusan produk & alur UI/UX verifikasi tambahan)
 
 ### [INF-DB-001] Prisma / Neon Connection Pooling pada Lingkungan Serverless
 - **Kategori:** Bug-Keamanan
 - **Severity:** P1 (Tinggi)
 - **Lokasi:** `src/lib/prisma.ts:1-10` & `prisma/schema.prisma:5-9`
-- **Bukti:**
-  ```ts
-  const globalForPrisma = globalThis as unknown as { prisma?: PrismaClient };
-  export const prisma = globalForPrisma.prisma ?? new PrismaClient();
-  if (process.env.NODE_ENV !== "production") {
-    globalForPrisma.prisma = prisma;
-  }
-  ```
-- **Dampak:** Di environment production serverless (Vercel), singleton `globalForPrisma` diabaikan, dan setiap lambda container membuka instance `PrismaClient` baru. Jika `DATABASE_URL` tidak mengarah ke Neon pooled connection string (PgBouncer port 6543 / `?pgbouncer=true`), lonjakan request saat musim qurban akan menghabiskan batas koneksi database (`connection exhaustion`).
-- **Rekomendasi:** Pastikan `DATABASE_URL` di production menggunakan endpoint `-pooler` Neon dengan `?pgbouncer=true`, dan pertimbangkan penggunaan `@prisma/adapter-neon` untuk koneksi via HTTP WebSocket.
-- **Status:** Open (Needs Review)
+- **Bukti:** Instance `PrismaClient` diinstansiasi dengan singleton `globalThis` yang hanya aktif di `development`. Di lingkungan serverless production (Vercel), setiap cold start membuat koneksi baru. Jika `DATABASE_URL` tidak mengarah ke port PgBouncer 6543 / endpoint `-pooler` Neon dengan `?pgbouncer=true`, batas koneksi database dapat habis saat lonjakan traffic.
+- **Dampak:** `Max client connections reached` (HTTP 500) saat traffic ramai.
+- **Rekomendasi:** Pastikan environment variable `DATABASE_URL` di production menggunakan Neon pooled connection string.
+- **Status:** **BLOCKED** (Memerlukan verifikasi & pembaruan environment variable di dashboard hosting/Vercel)
+
+### [INF-PWA-001] Serwist Offline Fallback & Cache Invalidation
+- **Kategori:** Mekanisme
+- **Severity:** P2 (Sedang)
+- **Lokasi:** `src/app/sw.ts:16-44`
+- **Bukti:** Serwist mengaktifkan `skipWaiting: true` dan `clientsClaim: true`, namun tidak mendaftarkan `fallbacks: { entries: [{ url: '/offline' }] }` padahal route `/offline` tersedia.
+- **Dampak:** Pengguna yang offline dan membuka halaman baru mendapatkan error browser "No Internet" alih-alih UI `/offline`.
+- **Rekomendasi:** Konfigurasikan fallback navigasi dan client-side reload prompt.
+- **Status:** **Deferred** (Dijadwalkan untuk sprint PWA berikutnya)
 
 ---
 
-## 4. Temuan Lengkap Berdasarkan Kategori & Severity
+## 4. Rincian Temuan Utama
 
-### 🔴 P0 (Kritis — Blocker Go-Live)
-
-#### [P0-BUILD-001] Runtime Crash DOKU SNAP Akibat Pemanggilan `sha256.create()` Tidak Valid
+### [P0-BUILD-001] Runtime Crash DOKU SNAP `sha256.create()`
 - **Kategori:** Bug-Keamanan
-- **Severity:** P0
+- **Severity:** P0 (Kritis)
 - **Lokasi:** `src/lib/doku.ts:1, 72-73`
-- **Bukti:** `import { createHmac, randomUUID, sha256 } from "node:crypto";` dan `sha256.create().update(rawBody).digest("base64")`. Standard library `node:crypto` di Node.js tidak memiliki method `.create()` pada export sha256.
-- **Dampak:** Seluruh alur pembayaran DOKU SNAP dan verifikasi webhook crash total dengan runtime error `TypeError: sha256.create is not a function`.
-- **Rekomendasi:** Gunakan API standar Node.js: `import { createHash } from "node:crypto"; createHash("sha256").update(rawBody).digest("base64")`.
-- **Status:** Fixed
+- **Bukti:** `import { createHmac, randomUUID, sha256 } from "node:crypto";` dan `sha256.create().update(rawBody).digest("base64")`. Method `sha256.create()` tidak ada di Node.js standard library.
+- **Dampak:** Transaksi pembayaran DOKU dan webhook crash total dengan runtime error `TypeError: sha256.create is not a function`.
+- **Rekomendasi:** Gunakan `createHash("sha256")`.
+- **Status:** Fixed (PR #1)
 
-#### [P0-BUILD-002] Kegagalan Kompilasi Build Akibat Icon FontAwesome Tidak Ditemukan
+### [P0-BUILD-002] Compile Error FontAwesome `faShieldHalal`
 - **Kategori:** Bug-Keamanan
-- **Severity:** P0
+- **Severity:** P0 (Kritis)
 - **Lokasi:** `src/app/(marketing)/page.tsx:6`
-- **Bukti:** `import { faShieldHalal } from "@fortawesome/free-solid-svg-icons"`. Icon tersebut tidak ada di library FontAwesome free solid.
-- **Dampak:** `npm run build` dan `tsc` gagal total dengan error TS2724.
-- **Rekomendasi:** Ganti icon dengan `faShieldAlt` yang tersedia resmi di package.
-- **Status:** Fixed
+- **Bukti:** `faShieldHalal` tidak terdefinisi di `@fortawesome/free-solid-svg-icons`.
+- **Dampak:** `npm run build` dan `npx tsc --noEmit` gagal total (TS2724).
+- **Rekomendasi:** Ganti dengan `faShieldAlt`.
+- **Status:** Fixed (PR #1)
 
-#### [P0-CAT-001] Bug Filter Produk Menghasilkan Klausa Prisma Invalid
-- **Kategori:** Bug-Keamanan
-- **Severity:** P0
-- **Lokasi:** `src/app/api/products/route.ts:30`
-- **Bukti:** `purpose: purpose === "BOTH" ? { in: ["BOTH", "QURBAN", "AQIQAH"] } : { purpose }` menghasilkan `{ purpose: { purpose: "QURBAN" } }`.
-- **Dampak:** Query filter produk qurban/aqiqah crash dengan Prisma validation error 500 di server.
-- **Rekomendasi:** Susun klausa Prisma yang valid: `...(purpose ? { purpose: purpose === "BOTH" ? { in: [...] } : (purpose as LivestockPurpose) } : {})`.
-- **Status:** Fixed
-
-#### [P0-SEC-001] Kebocoran Kode OTP (`devCode`) pada Respon API Publik
-- **Kategori:** Bug-Keamanan
-- **Severity:** P0
-- **Lokasi:** `src/app/api/otp/send/route.ts:27-28`
-- **Bukti:** `return NextResponse.json({ success: true, data: { devCode: code } });` jika variabel `WHATSAPP_API_URL` tidak diset.
-- **Dampak:** Jika terjadi kesalahan konfigurasi environment variable di server production, kode OTP dibocorkan langsung ke client dalam respon JSON publik, memungkinkan siapa saja login ke akun nomor manapun tanpa ponsel.
-- **Rekomendasi:** Berikan guard ketat `process.env.NODE_ENV === "development"`, jangan pernah mengekspos `devCode` di production.
-- **Status:** Fixed
-
----
-
-### 🟡 P1 (Tinggi — Celah Keamanan & Risiko Transaksi Signifikan)
-
-#### [P1-SEC-002] Ketiadaan Rate Limiting pada Pengiriman OTP WhatsApp
-- **Kategori:** Bug-Keamanan
-- **Severity:** P1
-- **Lokasi:** `src/app/api/otp/send/route.ts:16-21`
-- **Bukti:** Tidak ada batasan frekuensi pengiriman OTP per nomor ponsel.
-- **Dampak:** Penyerang dapat mengirim ribuan OTP dalam waktu singkat, menguras saldo gateway WhatsApp dan memblokir nomor resmi platform.
-- **Rekomendasi:** Terapkan rate limit 60 detik berbasis Redis (`otp:ratelimit:{phone}`).
-- **Status:** Fixed
-
-#### [P1-SEC-003] Ketiadaan Proteksi Brute-Force pada Verifikasi OTP
-- **Kategori:** Bug-Keamanan
-- **Severity:** P1
-- **Lokasi:** `src/app/api/otp/verify/route.ts:10-28`
-- **Bukti:** Endpoint verifikasi OTP tidak memiliki batas percobaan (attempt counter).
-- **Dampak:** Penyerang dapat membobol 6 digit angka OTP via automated brute force sebelum waktu 5 menit berakhir.
-- **Rekomendasi:** Batasi maksimal 5 kali percobaan salah, lalu hapus kode OTP dan blokir permintaan.
-- **Status:** Fixed
-
-#### [P1-SEC-004] Verifikasi Webhook DOKU Rentan Timing Side-Channel Attack
-- **Kategori:** Bug-Keamanan
-- **Severity:** P1
-- **Lokasi:** `src/lib/doku.ts:170` & `src/app/api/doku/webhook/route.ts:20`
-- **Bukti:** Menggunakan perbandingan string `expected === signature`.
-- **Dampak:** Penyerang dapat merekonstruksi signature HMAC byte-demi-byte menggunakan timing attack.
-- **Rekomendasi:** Gunakan `crypto.timingSafeEqual`.
-- **Status:** Fixed
-
-#### [P1-PAY-001] Race Condition Pengurangan Stok Hewan Qurban saat Checkout Paralel
-- **Kategori:** Bug-Keamanan / Mekanisme
-- **Severity:** P1
-- **Lokasi:** `src/app/api/orders/route.ts:20-33, 82-85`
-- **Bukti:** Pengecekan stok awal dilakukan di luar blok transaksi `$transaction` yang mengurangi stok.
-- **Dampak:** Dua pembeli dapat membeli 1 ekor hewan terakhir secara bersamaan (overselling).
-- **Rekomendasi:** Pindahkan validasi ketersediaan stok ke dalam `$transaction` Prisma secara atomik.
-- **Status:** Fixed (Perlu Review Manual)
-
-#### [P1-PAY-002] Kegagalan Webhook DOKU Akibat WhatsApp Gateway Error
-- **Kategori:** Bug-Keamanan
-- **Severity:** P1
-- **Lokasi:** `src/app/api/doku/webhook/route.ts:46-49`
-- **Bukti:** Pemanggilan notifikasi WhatsApp tidak dibungkus `try/catch`.
-- **Dampak:** Jika gateway WhatsApp timeout/error, webhook DOKU merespon 500, memicu DOKU melakukan retry berulang kali.
-- **Rekomendasi:** Bungkus notifikasi di dalam `try/catch` dan gunakan `updateMany` atomik agar idempoten.
-- **Status:** Fixed
-
-#### [P1-PAY-003] Ketidaksinkronan Relasional Pesanan Multi-Item (Model Order Tanpa OrderItem)
+### [P1-PAY-003] Multi-Item Order Tanpa Tabel `OrderItem` (BLOCKER)
 - **Kategori:** Mekanisme
-- **Severity:** P1 (Tinggi / **BLOCKER FOR MULTI-ITEM FEATURE**)
+- **Severity:** P1 (Tinggi / **BLOCKER FOR MULTI-ITEM CHECKOUT**)
 - **Lokasi:** `src/app/api/orders/route.ts:50, 72` & `prisma/schema.prisma:98-124`
-- **Bukti:** Model `Order` di Prisma hanya memiliki field single `livestockId` dan `quantity`. Saat keranjang berisi 2 hewan berbeda, kedua stok berkurang dan total harga diakumulasikan, namun pesanan di DB hanya mencatat item pertama. Item kedua hilang dari faktur, sertifikat, dan pelacakan.
-- **Dampak:** Konsumen membayar 2 hewan, tetapi pesanan hanya menampilkan 1 hewan. Menimbulkan sengketa hukum dan kegagalan distribusi hewan qurban.
-- **Rekomendasi:** Batasi checkout hanya untuk 1 varian hewan per checkout hingga tabel relasional `OrderItem` dibuat via migrasi DB.
-- **Status:** Needs Review (Marked as Blocker for Multi-Item Checkout)
-
-#### [P1-SEC-005] Ketiadaan Verifikasi Otorisasi pada Endpoint Generate Ulang Pembayaran
-- **Kategori:** Bug-Keamanan
-- **Severity:** P1
-- **Lokasi:** `src/app/api/doku/create/route.ts:13-44`
-- **Bukti:** Fungsi `auth()` diimpor tetapi tidak dipanggil untuk memverifikasi apakah pemohon adalah pemilik order atau admin.
-- **Dampak:** Siapapun dapat meng-generate ulang link pembayaran untuk order orang lain.
-- **Rekomendasi:** Cocokkan sesi pengguna dengan `order.guestPhone` atau role `ADMIN`.
-- **Status:** Fixed
-
-#### [P1-UI-001] Target Sentuh Tombol Navigasi Mobile Kurang dari 44x44px (WCAG 2.5.5)
-- **Kategori:** UI-UX
-- **Severity:** P1
-- **Lokasi:** `src/components/layout/Header.tsx:30, 44` & `src/components/layout/ThemeToggle.tsx:36`
-- **Bukti:** Tombol kembali, keranjang, dan toggle tema berukuran `h-9 w-9` (36×36px).
-- **Dampak:** Kesulitan navigasi bagi pengguna mobile dan pengguna berkebutuhan khusus motorik.
-- **Rekomendasi:** Perbesar ukuran target sentuh menjadi minimal `h-11 w-11` (44×44px).
-- **Status:** Fixed
-
-#### [P1-UI-002] Hydration Mismatch pada Form Input Akibat `Math.random()`
-- **Kategori:** UI-UX / Bug-Keamanan
-- **Severity:** P1
-- **Lokasi:** `src/components/ui/input.tsx:15, 53`
-- **Bukti:** `const inputId = id ?? props.name ?? Math.random().toString(36).slice(2);`
-- **Dampak:** Menghasilkan peringatan React hydration mismatch pada SSR dan memutuskan hubungan label dengan input.
-- **Rekomendasi:** Gunakan hook native `React.useId()`.
-- **Status:** Fixed
+- **Bukti:** Model Prisma `Order` hanya memiliki kolom tunggal `livestockId` dan `quantity`. Keranjang belanja yang berisi > 1 jenis hewan qurban memotong stok kedua hewan dan menagih total harga keduanya, namun hanya mencatat hewan pertama di database.
+- **Dampak:** Hewan kedua hilang dari faktur `/pesanan/[id]`, sertifikat kurban, dan surat jalan pengiriman daging.
+- **Rekomendasi:** Batasi checkout hanya untuk 1 jenis hewan qurban per transaksi atau buat tabel relasi `OrderItem` via migrasi database.
+- **Status:** **BLOCKED** (Fitur multi-item ditandai BLOCKED sampai skema database diperbarui)
 
 ---
 
-### 🟡 P2 (Sedang — Non-Blocker)
+## 5. Ringkasan Pengujian Otomatis
 
-#### [P2-PWA-001] Offline Sync Queue Berisiko Mengirim Pesanan Ganda & Terhenti pada Error 4xx
-- **Kategori:** Mekanisme
-- **Severity:** P2
-- **Lokasi:** `src/hooks/useOfflineSync.ts:26-36`
-- **Bukti:** `flushQueue` tidak memiliki flag `isFlushing` dan langsung berhenti (`break`) pada error apapun.
-- **Dampak:** Pesanan dapat terkirim ganda saat koneksi tidak stabil, dan antrean macet jika ada satu payload tidak valid.
-- **Rekomendasi:** Pasang flag `isFlushing` dan singkirkan payload dengan status 4xx.
-- **Status:** Fixed
-
-#### [P2-UI-003] Ketiadaan Varian Dark Mode pada Token Komponen Tertentu
-- **Kategori:** Style-Layout
-- **Severity:** P2
-- **Lokasi:** `src/components/ui/badge.tsx:16`, `src/components/ui/tabs.tsx:58`, `src/components/shared/LoadingSkeleton.tsx:4`
-- **Bukti:** Komponen menggunakan `bg-black/5` tanpa varian `dark:bg-white/10`.
-- **Dampak:** Komponen badge neutral, tabs list, dan skeleton tidak terlihat di dark mode.
-- **Rekomendasi:** Tambahkan kelas utility `dark:bg-white/10`.
-- **Status:** Fixed
-
-#### [P2-A11Y-001] Dialog Modal Kehilangan Komposisi Handler `onClick` pada `asChild`
-- **Kategori:** UI-UX
-- **Severity:** P2
-- **Lokasi:** `src/components/ui/dialog.tsx:55-57`
-- **Bukti:** `cloneElement` menimpa properti `onClick` child tanpa mengeksekusi handler bawaan elemen anak.
-- **Dampak:** Handler klik komponen pemicu modal tidak dieksekusi.
-- **Rekomendasi:** Komposisikan handler klik: `child.props?.onClick?.(e); setOpen(true);`.
-- **Status:** Fixed
-
-#### [P2-UI-004] Iframe Live CCTV Kandang Tidak Memiliki Atribut Pengaman Sandbox
-- **Kategori:** Bug-Keamanan
-- **Severity:** P2
-- **Lokasi:** `src/app/(marketing)/produk/[slug]/page.tsx:94`
-- **Bukti:** `<iframe src={product.cctvUrl} ... />` tanpa sandbox.
-- **Dampak:** Berisiko clickjacking atau script eksekusi jika URL CCTV dikompromikan.
-- **Rekomendasi:** Tambahkan atribut `sandbox="allow-scripts allow-same-origin"`.
-- **Status:** Fixed
-
----
-
-## 5. Ringkasan Status Perbaikan
-
-- **Total Temuan Diperbaiki:** 15 item kunci (termasuk seluruh bug crash P0 dan type error kompilasi).
-- **Unit Test Baru:** 10 test (DOKU Webhook Signature, OTP Rate Limiter, Atomic Stock Concurrency) — **100% Pass**.
-- **Status PR:** **BLOCKED** untuk fitur multi-item checkout, siap diajukan untuk perbaikan bug dan peningkatan keamanan single-item qurban.
+- **Test Suite:** 5 file, 16 unit & integration tests (`npm test` via Vitest) — **100% PASS** (240ms).
+- **E2E Flow:** 1 integration test alur penuh `Guest Checkout → PENDING → DOKU Webhook → PAID` — **PASS**.
+- **Typecheck:** `npx tsc --noEmit` — **0 errors**.
+- **Build:** `npm run build` — **22/22 routes tergenerasi sukses**.

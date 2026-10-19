@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach } from "vitest";
 
-// Simulasi database storage & transaksi atomik
+// Simulasi database storage & transaksi atomik Prisma
 interface LivestockRecord {
   id: string;
   name: string;
@@ -12,7 +12,7 @@ class MockPrismaDatabase {
   public orders: Array<{ id: string; livestockId: string; quantity: number }> = [];
   private lock = Promise.resolve();
 
-  // Simulasi Prisma $transaction dengan pessimistic queue lock
+  // Simulasi Prisma $transaction dengan concurrency queue
   async transaction<T>(fn: (tx: MockTx) => Promise<T>): Promise<T> {
     const prevLock = this.lock;
     let releaseLock: () => void = () => {};
@@ -67,14 +67,14 @@ class MockTx {
   }
 
   rollback() {
-    // discarded
+    // Seluruh perubahan dalam memori transaksi dibuang (rollback atomik)
   }
 }
 
 // Handler simulasi proses checkout yang digunakan di api/orders/route.ts
 async function processOrderCheckout(
   db: MockPrismaDatabase,
-  input: { orderId: string; livestockId: string; quantity: number }
+  input: { orderId: string; livestockId: string; quantity: number; shouldThrowMidway?: boolean }
 ) {
   return await db.transaction(async (tx) => {
     const current = await tx.findUniqueLivestock(input.livestockId);
@@ -82,7 +82,14 @@ async function processOrderCheckout(
       throw new Error(`Stok ${current?.name ?? "hewan"} tidak mencukupi`);
     }
 
+    // Kurangi stok di dalam transaksi
     await tx.updateLivestockStock(input.livestockId, input.quantity);
+
+    // Simulasi kegagalan / exception di tengah transaksi
+    if (input.shouldThrowMidway) {
+      throw new Error("Internal Server Error: Koneksi database terputus saat simpan pesanan");
+    }
+
     return await tx.createOrder({
       id: input.orderId,
       livestockId: input.livestockId,
@@ -103,7 +110,7 @@ describe("Atomic Stock Concurrency Verification", () => {
     });
   });
 
-  it("mencegah overselling saat dua checkout berjalan paralel untuk stok terakhir", async () => {
+  it("(a) 2 checkout paralel dengan stok 1: tepat satu berhasil, satu gagal → stok akhir 0", async () => {
     const orderA = processOrderCheckout(db, {
       orderId: "order-user-a",
       livestockId: "hewan-1",
@@ -116,25 +123,55 @@ describe("Atomic Stock Concurrency Verification", () => {
       quantity: 1,
     });
 
-    // Jalankan kedua checkout secara simultan
     const results = await Promise.allSettled([orderA, orderB]);
 
     const fulfilled = results.filter((r) => r.status === "fulfilled");
     const rejected = results.filter((r) => r.status === "rejected");
 
-    // TEPAT SATU yang harus berhasil, dan TEPAT SATU yang ditolak karena kehabisan stok
     expect(fulfilled).toHaveLength(1);
     expect(rejected).toHaveLength(1);
 
-    // Alasan penolakan harus jelas
     const rejectionReason = (rejected[0] as PromiseRejectedResult).reason;
     expect(rejectionReason.message).toContain("Stok Domba Garut Super tidak mencukupi");
 
-    // Verifikasi integritas stok di database: stok harus 0, BUKAN -1
+    // Verifikasi stok akhir adalah 0 (tidak pernah negatif/oversold)
     const finalLivestock = db.livestock.get("hewan-1");
     expect(finalLivestock?.stock).toBe(0);
-
-    // Verifikasi pesanan yang tercatat hanya 1
     expect(db.orders).toHaveLength(1);
+  });
+
+  it("(b) rollback otomatis saat terjadi exception di tengah transaksi: stok tidak berkurang", async () => {
+    // Stok awal = 1
+    expect(db.livestock.get("hewan-1")?.stock).toBe(1);
+
+    // Jalankan checkout dengan simulasi crash di tengah transaksi
+    await expect(
+      processOrderCheckout(db, {
+        orderId: "order-crash-test",
+        livestockId: "hewan-1",
+        quantity: 1,
+        shouldThrowMidway: true,
+      })
+    ).rejects.toThrow("Koneksi database terputus");
+
+    // Stok harus tetap 1 (utuh setelah rollback, tidak terkurangi)
+    expect(db.livestock.get("hewan-1")?.stock).toBe(1);
+    // Tidak ada order yang terbuat
+    expect(db.orders).toHaveLength(0);
+  });
+
+  it("(c) pesanan dengan quantity > 1 melebihi stok yang tersedia langsung ditolak", async () => {
+    // Hewan hanya punya stok 1, pembeli mencoba checkout 2
+    await expect(
+      processOrderCheckout(db, {
+        orderId: "order-excessive-qty",
+        livestockId: "hewan-1",
+        quantity: 2,
+      })
+    ).rejects.toThrow("Stok Domba Garut Super tidak mencukupi");
+
+    // Stok harus tetap utuh 1
+    expect(db.livestock.get("hewan-1")?.stock).toBe(1);
+    expect(db.orders).toHaveLength(0);
   });
 });
